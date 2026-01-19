@@ -1,0 +1,20 @@
+# Django
+Django==5.0.1
+djangorestframework==3.14.0
+django-filter==23.5
+django-cors-headers==4.3.1
+
+# Scraping
+requests==2.31.0
+beautifulsoup4==4.12.2
+
+# Celery (tarefas em background)
+celery==5.3.4
+redis==5.0.1
+
+# Utilitários
+python-dotenv==1.0.0
+dj-database-url==2.1.0
+
+# Produção
+gunicorn==21.2.0
