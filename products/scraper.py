@@ -4,26 +4,58 @@ import requests
 from bs4 import BeautifulSoup
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlparse
+import time
+import random
 
 
 def get_headers():
+    user_agents = [
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0',
+    ]
+    
     return {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'User-Agent': random.choice(user_agents),
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
         'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
         'Accept-Encoding': 'gzip, deflate, br',
         'Connection': 'keep-alive',
+        'Cache-Control': 'max-age=0',
+        'Sec-Ch-Ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"Windows"',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Upgrade-Insecure-Requests': '1',
+        'Referer': 'https://www.google.com/',
     }
 
 
-def fetch_page(url):
-    try:
-        response = requests.get(url, headers=get_headers(), timeout=15)
-        response.raise_for_status()
-        return response.text
-    except requests.RequestException as e:
-        print(f"[SCRAPER] Erro: {e}")
-        return None
+def fetch_page(url, retries=3):
+    for attempt in range(retries):
+        try:
+            session = requests.Session()
+            headers = get_headers()
+            
+            response = session.get(url, headers=headers, timeout=20, allow_redirects=True)
+            response.raise_for_status()
+            
+            if len(response.text) < 1000:
+                print(f"[SCRAPER] Resposta muito curta, tentando novamente...")
+                time.sleep(1)
+                continue
+                
+            return response.text
+        except requests.RequestException as e:
+            print(f"[SCRAPER] Tentativa {attempt + 1} falhou: {e}")
+            if attempt < retries - 1:
+                time.sleep(2)
+    
+    return None
 
 
 def clean_price(price_text):
@@ -43,7 +75,10 @@ def clean_price(price_text):
         cleaned = cleaned.replace(',', '.')
 
     try:
-        return Decimal(cleaned)
+        price = Decimal(cleaned)
+        if price > 0:
+            return price
+        return None
     except InvalidOperation:
         return None
 
@@ -66,224 +101,249 @@ def get_site_name(url):
         return 'americanas'
     elif 'casasbahia' in domain:
         return 'casasbahia'
-    elif 'extra.com' in domain:
-        return 'extra'
     return 'generic'
 
 
-def scrape_mercadolivre(html):
+def extract_json_ld_price(html):
     soup = BeautifulSoup(html, 'html.parser')
-
     scripts = soup.find_all('script', type='application/ld+json')
+    
     for script in scripts:
         try:
-            if script.string:
-                data = json.loads(script.string)
-                items = data if isinstance(data, list) else [data]
-                for item in items:
-                    if isinstance(item, dict) and 'offers' in item:
-                        offers = item['offers']
-                        price = offers.get('price') if isinstance(offers, dict) else offers[0].get('price') if offers else None
-                        if price and float(price) > 50:
-                            return Decimal(str(price))
+            if not script.string:
+                continue
+                
+            data = json.loads(script.string)
+            items = data if isinstance(data, list) else [data]
+            
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                    
+                if item.get('@type') in ['Product', 'IndividualProduct', 'ProductModel']:
+                    offers = item.get('offers', {})
+                    
+                    if isinstance(offers, list) and offers:
+                        offers = offers[0]
+                    
+                    if isinstance(offers, dict):
+                        price = offers.get('price') or offers.get('lowPrice') or offers.get('highPrice')
+                        if price:
+                            try:
+                                return Decimal(str(price))
+                            except:
+                                pass
+                                
+                if 'offers' in item:
+                    offers = item['offers']
+                    if isinstance(offers, list) and offers:
+                        offers = offers[0]
+                    if isinstance(offers, dict):
+                        price = offers.get('price') or offers.get('lowPrice')
+                        if price:
+                            try:
+                                return Decimal(str(price))
+                            except:
+                                pass
         except:
             pass
-
-    prices = re.findall(r'"price"\s*:\s*(\d{3,}\.?\d*)', html)
-    for p in prices:
-        price = clean_price(p)
-        if price and price > 50:
-            return price
-
+    
     return None
 
 
-def scrape_kabum(html):
-    soup = BeautifulSoup(html, 'html.parser')
-
-    scripts = soup.find_all('script', type='application/ld+json')
-    for script in scripts:
-        try:
-            if script.string:
-                data = json.loads(script.string)
-                if isinstance(data, dict) and 'offers' in data:
-                    price = data['offers'].get('price')
-                    if price:
-                        return Decimal(str(price))
-        except:
-            pass
-
-    for pattern in [r'"priceWithDiscount"\s*:\s*(\d+\.?\d*)', r'"price"\s*:\s*(\d+\.?\d*)']:
-        match = re.search(pattern, html)
-        if match:
-            price = clean_price(match.group(1))
-            if price and price > 10:
-                return price
-
-    return None
-
-
-def scrape_magalu(html):
-    soup = BeautifulSoup(html, 'html.parser')
-
-    scripts = soup.find_all('script', type='application/ld+json')
-    for script in scripts:
-        try:
-            if script.string:
-                data = json.loads(script.string)
-                
-                if isinstance(data, list):
-                    for item in data:
-                        if isinstance(item, dict) and item.get('@type') == 'Product':
-                            data = item
-                            break
-                
-                if isinstance(data, dict):
-                    if 'offers' in data:
-                        offers = data['offers']
-                        if isinstance(offers, dict):
-                            price = offers.get('price') or offers.get('lowPrice')
-                            if price:
-                                return Decimal(str(price))
-                        elif isinstance(offers, list) and offers:
-                            price = offers[0].get('price')
-                            if price:
-                                return Decimal(str(price))
-        except:
-            pass
-
+def extract_price_from_patterns(html, min_price=10):
     patterns = [
-        r'"price"\s*:\s*"?(\d+\.?\d*)"?',
-        r'"bestPrice"\s*:\s*"?(\d+\.?\d*)"?',
-        r'"lowPrice"\s*:\s*"?(\d+\.?\d*)"?',
-        r'"sellingPrice"\s*:\s*"?(\d+\.?\d*)"?',
+        r'"price"\s*:\s*(\d+\.?\d*)',
+        r'"lowPrice"\s*:\s*(\d+\.?\d*)',
+        r'"bestPrice"\s*:\s*(\d+\.?\d*)',
+        r'"sellingPrice"\s*:\s*(\d+\.?\d*)',
+        r'"priceWithDiscount"\s*:\s*(\d+\.?\d*)',
+        r'"salePrice"\s*:\s*(\d+\.?\d*)',
+        r'"finalPrice"\s*:\s*(\d+\.?\d*)',
+        r'"spotPrice"\s*:\s*(\d+\.?\d*)',
+        r'"priceValidUntil"[^}]*"price"\s*:\s*(\d+\.?\d*)',
         r'data-price="(\d+\.?\d*)"',
-        r'"installmentPrice"\s*:\s*"?(\d+\.?\d*)"?',
+        r'content="(\d+\.?\d*)"[^>]*itemprop="price"',
+        r'itemprop="price"[^>]*content="(\d+\.?\d*)"',
     ]
+    
+    all_prices = []
     
     for pattern in patterns:
         matches = re.findall(pattern, html)
         for match in matches:
             price = clean_price(match)
+            if price and price > min_price:
+                all_prices.append(price)
+    
+    if all_prices:
+        price_count = {}
+        for p in all_prices:
+            p_str = str(p)
+            price_count[p_str] = price_count.get(p_str, 0) + 1
+        
+        most_common = max(price_count, key=price_count.get)
+        return Decimal(most_common)
+    
+    return None
+
+
+def scrape_mercadolivre(html):
+    price = extract_json_ld_price(html)
+    if price and price > 50:
+        return price
+    
+    price = extract_price_from_patterns(html, min_price=50)
+    if price:
+        return price
+    
+    return None
+
+
+def scrape_kabum(html):
+    price = extract_json_ld_price(html)
+    if price and price > 10:
+        return price
+    
+    price = extract_price_from_patterns(html, min_price=10)
+    if price:
+        return price
+    
+    return None
+
+
+def scrape_magalu(html):
+    price = extract_json_ld_price(html)
+    if price and price > 10:
+        return price
+    
+    patterns = [
+        r'"price"\s*:\s*"?(\d+\.?\d*)"?',
+        r'"bestPrice"\s*:\s*"?(\d+\.?\d*)"?',
+        r'"fullPrice"\s*:\s*"?(\d+\.?\d*)"?',
+        r'"installmentPrice"\s*:\s*"?(\d+\.?\d*)"?',
+        r'"priceWithPaymentDiscount"\s*:\s*"?(\d+\.?\d*)"?',
+        r'Por:</span>[^<]*R\$\s*([\d.,]+)',
+        r'class="price[^"]*"[^>]*>R\$\s*([\d.,]+)',
+    ]
+    
+    for pattern in patterns:
+        matches = re.findall(pattern, html, re.IGNORECASE)
+        for match in matches:
+            price = clean_price(match)
             if price and price > 50:
                 return price
-
-    price_match = re.search(r'R\$\s*([\d.,]+)', html)
-    if price_match:
-        price = clean_price(price_match.group(1))
-        if price and price > 50:
+    
+    price = extract_price_from_patterns(html, min_price=50)
+    if price:
+        return price
+    
+    soup = BeautifulSoup(html, 'html.parser')
+    
+    meta = soup.find('meta', {'property': 'product:price:amount'})
+    if meta and meta.get('content'):
+        price = clean_price(meta['content'])
+        if price and price > 10:
             return price
-
+    
+    meta = soup.find('meta', {'itemprop': 'price'})
+    if meta and meta.get('content'):
+        price = clean_price(meta['content'])
+        if price and price > 10:
+            return price
+    
     return None
 
 
 def scrape_pichau(html):
-    soup = BeautifulSoup(html, 'html.parser')
-
-    scripts = soup.find_all('script', type='application/ld+json')
-    for script in scripts:
-        try:
-            if script.string:
-                data = json.loads(script.string)
-                if isinstance(data, dict) and 'offers' in data:
-                    price = data['offers'].get('price')
-                    if price:
-                        return Decimal(str(price))
-        except:
-            pass
-
+    price = extract_json_ld_price(html)
+    if price and price > 10:
+        return price
+    
+    price = extract_price_from_patterns(html, min_price=10)
+    if price:
+        return price
+    
     return None
 
 
 def scrape_terabyte(html):
     soup = BeautifulSoup(html, 'html.parser')
-
+    
     el = soup.select_one('#valVista')
     if el:
         price = clean_price(el.get_text())
         if price and price > 10:
             return price
-
+    
+    price = extract_json_ld_price(html)
+    if price and price > 10:
+        return price
+    
     return None
 
 
 def scrape_amazon(html):
     soup = BeautifulSoup(html, 'html.parser')
-
-    for selector in ['.a-price .a-offscreen', '#priceblock_ourprice', '#priceblock_dealprice']:
+    
+    selectors = [
+        '.a-price .a-offscreen',
+        '#priceblock_ourprice',
+        '#priceblock_dealprice', 
+        '#corePrice_feature_div .a-offscreen',
+        '.priceToPay .a-offscreen',
+    ]
+    
+    for selector in selectors:
         el = soup.select_one(selector)
         if el:
             price = clean_price(el.get_text())
             if price and price > 10:
                 return price
-
+    
+    price = extract_json_ld_price(html)
+    if price and price > 10:
+        return price
+    
     return None
 
 
 def scrape_americanas(html):
-    soup = BeautifulSoup(html, 'html.parser')
-
-    scripts = soup.find_all('script', type='application/ld+json')
-    for script in scripts:
-        try:
-            if script.string:
-                data = json.loads(script.string)
-                if isinstance(data, dict) and 'offers' in data:
-                    offers = data['offers']
-                    price = offers.get('price') or offers.get('lowPrice') if isinstance(offers, dict) else None
-                    if price:
-                        return Decimal(str(price))
-        except:
-            pass
-
-    patterns = [r'"price"\s*:\s*(\d+\.?\d*)', r'"bestPrice"\s*:\s*(\d+\.?\d*)']
-    for pattern in patterns:
-        match = re.search(pattern, html)
-        if match:
-            price = clean_price(match.group(1))
-            if price and price > 10:
-                return price
-
+    price = extract_json_ld_price(html)
+    if price and price > 10:
+        return price
+    
+    price = extract_price_from_patterns(html, min_price=10)
+    if price:
+        return price
+    
     return None
 
 
 def scrape_generic(html):
+    price = extract_json_ld_price(html)
+    if price and price > 10:
+        return price
+    
     soup = BeautifulSoup(html, 'html.parser')
-
-    scripts = soup.find_all('script', type='application/ld+json')
-    for script in scripts:
-        try:
-            if script.string:
-                data = json.loads(script.string)
-                items = data if isinstance(data, list) else [data]
-                for item in items:
-                    if isinstance(item, dict) and 'offers' in item:
-                        offers = item['offers']
-                        price = offers.get('lowPrice') or offers.get('price') if isinstance(offers, dict) else None
-                        if price:
-                            return Decimal(str(price))
-        except:
-            pass
-
-    for selector in ['meta[property="product:price:amount"]', 'meta[itemprop="price"]']:
-        meta = soup.select_one(selector)
-        if meta:
-            price = clean_price(meta.get('content'))
-            if price and price > 10:
-                return price
-
-    patterns = [
-        r'"price"\s*:\s*"?(\d+\.?\d*)"?',
-        r'"lowPrice"\s*:\s*"?(\d+\.?\d*)"?',
-        r'"bestPrice"\s*:\s*"?(\d+\.?\d*)"?',
+    
+    meta_selectors = [
+        ('meta', {'property': 'product:price:amount'}),
+        ('meta', {'itemprop': 'price'}),
+        ('meta', {'name': 'price'}),
     ]
-    for pattern in patterns:
-        match = re.search(pattern, html)
-        if match:
-            price = clean_price(match.group(1))
+    
+    for tag, attrs in meta_selectors:
+        meta = soup.find(tag, attrs)
+        if meta and meta.get('content'):
+            price = clean_price(meta['content'])
             if price and price > 10:
                 return price
-
+    
+    price = extract_price_from_patterns(html, min_price=10)
+    if price:
+        return price
+    
     return None
 
 
@@ -292,6 +352,7 @@ def scrape_price(url):
 
     html = fetch_page(url)
     if not html:
+        print("[SCRAPER] Falha ao buscar página")
         return None
 
     site = get_site_name(url)
@@ -306,13 +367,13 @@ def scrape_price(url):
         'magalu': scrape_magalu,
         'americanas': scrape_americanas,
         'casasbahia': scrape_americanas,
-        'extra': scrape_americanas,
         'generic': scrape_generic,
     }
 
     price = scrapers.get(site, scrape_generic)(html)
 
     if not price and site != 'generic':
+        print("[SCRAPER] Tentando scraper genérico...")
         price = scrape_generic(html)
 
     if price:
