@@ -11,6 +11,8 @@ def get_headers():
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
     }
 
 
@@ -60,6 +62,12 @@ def get_site_name(url):
         return 'amazon'
     elif 'magalu' in domain or 'magazineluiza' in domain:
         return 'magalu'
+    elif 'americanas' in domain:
+        return 'americanas'
+    elif 'casasbahia' in domain:
+        return 'casasbahia'
+    elif 'extra.com' in domain:
+        return 'extra'
     return 'generic'
 
 
@@ -115,6 +123,60 @@ def scrape_kabum(html):
     return None
 
 
+def scrape_magalu(html):
+    soup = BeautifulSoup(html, 'html.parser')
+
+    scripts = soup.find_all('script', type='application/ld+json')
+    for script in scripts:
+        try:
+            if script.string:
+                data = json.loads(script.string)
+                
+                if isinstance(data, list):
+                    for item in data:
+                        if isinstance(item, dict) and item.get('@type') == 'Product':
+                            data = item
+                            break
+                
+                if isinstance(data, dict):
+                    if 'offers' in data:
+                        offers = data['offers']
+                        if isinstance(offers, dict):
+                            price = offers.get('price') or offers.get('lowPrice')
+                            if price:
+                                return Decimal(str(price))
+                        elif isinstance(offers, list) and offers:
+                            price = offers[0].get('price')
+                            if price:
+                                return Decimal(str(price))
+        except:
+            pass
+
+    patterns = [
+        r'"price"\s*:\s*"?(\d+\.?\d*)"?',
+        r'"bestPrice"\s*:\s*"?(\d+\.?\d*)"?',
+        r'"lowPrice"\s*:\s*"?(\d+\.?\d*)"?',
+        r'"sellingPrice"\s*:\s*"?(\d+\.?\d*)"?',
+        r'data-price="(\d+\.?\d*)"',
+        r'"installmentPrice"\s*:\s*"?(\d+\.?\d*)"?',
+    ]
+    
+    for pattern in patterns:
+        matches = re.findall(pattern, html)
+        for match in matches:
+            price = clean_price(match)
+            if price and price > 50:
+                return price
+
+    price_match = re.search(r'R\$\s*([\d.,]+)', html)
+    if price_match:
+        price = clean_price(price_match.group(1))
+        if price and price > 50:
+            return price
+
+    return None
+
+
 def scrape_pichau(html):
     soup = BeautifulSoup(html, 'html.parser')
 
@@ -158,6 +220,33 @@ def scrape_amazon(html):
     return None
 
 
+def scrape_americanas(html):
+    soup = BeautifulSoup(html, 'html.parser')
+
+    scripts = soup.find_all('script', type='application/ld+json')
+    for script in scripts:
+        try:
+            if script.string:
+                data = json.loads(script.string)
+                if isinstance(data, dict) and 'offers' in data:
+                    offers = data['offers']
+                    price = offers.get('price') or offers.get('lowPrice') if isinstance(offers, dict) else None
+                    if price:
+                        return Decimal(str(price))
+        except:
+            pass
+
+    patterns = [r'"price"\s*:\s*(\d+\.?\d*)', r'"bestPrice"\s*:\s*(\d+\.?\d*)']
+    for pattern in patterns:
+        match = re.search(pattern, html)
+        if match:
+            price = clean_price(match.group(1))
+            if price and price > 10:
+                return price
+
+    return None
+
+
 def scrape_generic(html):
     soup = BeautifulSoup(html, 'html.parser')
 
@@ -183,6 +272,18 @@ def scrape_generic(html):
             if price and price > 10:
                 return price
 
+    patterns = [
+        r'"price"\s*:\s*"?(\d+\.?\d*)"?',
+        r'"lowPrice"\s*:\s*"?(\d+\.?\d*)"?',
+        r'"bestPrice"\s*:\s*"?(\d+\.?\d*)"?',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, html)
+        if match:
+            price = clean_price(match.group(1))
+            if price and price > 10:
+                return price
+
     return None
 
 
@@ -202,6 +303,10 @@ def scrape_price(url):
         'pichau': scrape_pichau,
         'terabyte': scrape_terabyte,
         'amazon': scrape_amazon,
+        'magalu': scrape_magalu,
+        'americanas': scrape_americanas,
+        'casasbahia': scrape_americanas,
+        'extra': scrape_americanas,
         'generic': scrape_generic,
     }
 
