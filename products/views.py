@@ -7,6 +7,8 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 
 from .models import Product, PriceHistory
 from .serializers import ProductSerializer, ProductCreateSerializer, PriceHistorySerializer
+from .scraper import scrape_price
+from django.utils import timezone
 
 
 class ProductViewSet(viewsets.ModelViewSet):
@@ -27,11 +29,14 @@ class ProductViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         product = serializer.save()
 
-        if request.data.get('start_scraping', False):
-            def do_scrape():
-                from products.tasks import scrape_product_price
-                scrape_product_price(product.id)
-            threading.Thread(target=do_scrape).start()
+        price = scrape_price(product.url)
+        
+        if price:
+            product.last_price = price
+            product.last_checked = timezone.now()
+            product.save()
+            
+            PriceHistory.objects.create(product=product, price=price)
 
         return Response(ProductSerializer(product).data, status=status.HTTP_201_CREATED)
 
@@ -40,8 +45,15 @@ class ProductViewSet(viewsets.ModelViewSet):
         product = self.get_object()
 
         def do_scrape():
-            from products.tasks import scrape_product_price
-            scrape_product_price(product.id)
+            from .scraper import scrape_price
+            from django.utils import timezone
+            
+            price = scrape_price(product.url)
+            if price:
+                product.last_price = price
+                product.last_checked = timezone.now()
+                product.save()
+                PriceHistory.objects.create(product=product, price=price)
 
         threading.Thread(target=do_scrape).start()
 
