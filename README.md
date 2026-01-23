@@ -1,20 +1,23 @@
-# PriceWatch Backend
+# PriceWatch - Backend
 
-API de monitoramento de preços.
+API para monitoramento de preços.
+
+## Tecnologias
+
+- Django 5
+- Django REST Framework
+- BeautifulSoup (scraping)
+
+## Sites compatíveis
+
+- Kabum
+- Trocafone
 
 ## Rodar local
 
 ```bash
-# Windows
 python -m venv venv
-venv\Scripts\activate
-pip install -r requirements.txt
-python manage.py migrate
-python manage.py runserver
-
-# Linux/Mac
-python -m venv venv
-source venv/bin/activate
+venv\Scripts\activate  # Windows
 pip install -r requirements.txt
 python manage.py migrate
 python manage.py runserver
@@ -22,14 +25,13 @@ python manage.py runserver
 
 ## Endpoints
 
-- GET /api/products/ - Lista produtos
-- POST /api/products/ - Cria produto
-- GET /api/products/{id}/ - Detalhe
-- DELETE /api/products/{id}/ - Remove
-- POST /api/products/{id}/scrape/ - Atualiza preço
-- GET /api/products/{id}/history/ - Histórico
+- `GET /api/products/` - lista produtos
+- `POST /api/products/` - cria produto
+- `DELETE /api/products/{id}/` - remove produto
+- `POST /api/products/{id}/scrape/` - atualiza preço
+- `GET /api/products/{id}/history/` - histórico de preços
 
 ## Deploy no Railway
 
-1. Conecta o repo no Railway
-2. Adiciona variáveis: SECRET_KEY, DEBUG=False, ALLOWED_HOSTS, CORS_ALLOWED_ORIGINS
+1. Conecte o repositório no Railway
+2. Configure as variáveis: `SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS`
