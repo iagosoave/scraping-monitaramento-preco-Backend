@@ -88,7 +88,7 @@ REST_FRAMEWORK = {
 }
 
 CORS_ALLOWED_ORIGINS = [
-    'https://pricewatchh.netlify.app',
+    'https://scrapingmonitarpreco.netlify.app',
     'http://localhost:5173',
     'http://localhost:3000',
 ]
