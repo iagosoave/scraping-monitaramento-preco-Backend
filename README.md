@@ -1,4 +1,5 @@
-# PriceWatch - Backend
+
+ Backend
 
 API para monitoramento de preços.
 
